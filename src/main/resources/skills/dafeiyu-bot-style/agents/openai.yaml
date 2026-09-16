@@ -1,0 +1,6 @@
+interface:
+  display_name: "大肥鱼群聊风格"
+  short_description: "判断大肥鱼是否接话，并生成自然克制、有熟人感的QQ群回复"
+  default_prompt: "Use $dafeiyu-bot-style to decide whether 大肥鱼 should reply and draft one natural QQ group message."
+policy:
+  allow_implicit_invocation: true

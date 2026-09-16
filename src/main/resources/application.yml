@@ -1,0 +1,31 @@
+server:
+  port: 8081
+spring:
+  application:
+    name: agent-service
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+        username: nacos
+        password: ${NACOS_PASSWORD}
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  config:
+    import: optional:classpath:application-local.yml
+langchain4j:
+  open-ai:
+    chat-model:
+      api-key: ${DEEPSEEK_API_KEY}
+      base-url: https://api.deepseek.com
+      model-name: deepseek-v4-flash
+tencent-memory:
+  base-url: http://localhost:8420
+  service-id: default
+  bearer-token: ${TENCENT_MEMORY_BEARER_TOKEN:local}
+  user-key: ${TENCENT_MEMORY_USER_KEY}
+  team-id: team-k6gyu6flql
+  agent-id: agt-k6o5vyz26h
+  user-id: usr-kzdjrfz1k4
