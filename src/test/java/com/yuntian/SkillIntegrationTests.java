@@ -73,16 +73,17 @@ class SkillIntegrationTests {
                 }
                 default -> {
                     assertThat(toolResult(request, "read_skill_resource")).contains(reference.content());
-                    yield AiMessage.from("{\"shouldReply\":true,\"reply\":\"在\"}");
+                    yield AiMessage.from("{\"shouldReply\":true,\"reply\":\"在\",\"meme\":\"装傻\"}");
                 }
             };
             var assistant = context.getBean(QQAssistant.class);
             var decision = assistant.chat("group-1", "MEMORY_FIRST", skills.formatAvailableSkills(), "群友：大肥鱼");
             assertThat(decision.shouldReply()).isTrue();
             assertThat(decision.reply()).isEqualTo("在");
+            assertThat(decision.meme()).isEqualTo("装傻");
             assertThat(model.requests).hasSize(3);
 
-            // 同一会话下一轮替换长期记忆，仍保留已加载的 Skill 上下文。
+            // 同一会话下一轮替换长期记忆，同时验证旧响应缺少 meme 时兼容为 null。
             model.responder = request -> {
                 assertSystemData(request, "MEMORY_SECOND");
                 assertThat(toolResult(request, "activate_skill")).contains(skill.content());
@@ -91,6 +92,7 @@ class SkillIntegrationTests {
             var next = assistant.chat("group-1", "MEMORY_SECOND", skills.formatAvailableSkills(), "群友甲：晚点吃饭");
             assertThat(next.shouldReply()).isFalse();
             assertThat(next.reply()).isEmpty();
+            assertThat(next.meme()).isNull();
         });
     }
 
@@ -107,9 +109,67 @@ class SkillIntegrationTests {
                     "group-silent", List.of(new ChatMessageItem("event-1", "群友甲", "晚点吃饭"))));
             assertThat(result.shouldReply()).isFalse();
             assertThat(result.reply()).isEmpty();
+            assertThat(result.meme()).isNull();
             verify(context.getBean(MemoryService.class)).saveConversation(
                     "group-silent", "以下是QQ群中刚刚连续出现的消息：\n\n群友甲：晚点吃饭\n", "");
         });
+    }
+
+    @Test
+    void agentServicePassesThroughAllReplyShapesWithoutChangingMemoryPayload() {
+        contextRunner.run(context -> {
+            var model = context.getBean(RecordingModel.class);
+            var service = context.getBean(AgentService.class);
+            var memoryService = context.getBean(MemoryService.class);
+
+            // 纯文字回复保留 null meme，记忆仍只保存文字。
+            model.responder = request -> AiMessage.from(
+                    "{\"shouldReply\":true,\"reply\":\"知道了\",\"meme\":null}");
+            var textOnly = service.chat(new AgentChatRequest(
+                    "group-text", List.of(new ChatMessageItem("event-text", "群友甲", "记得吃饭"))));
+            assertThat(textOnly.shouldReply()).isTrue();
+            assertThat(textOnly.reply()).isEqualTo("知道了");
+            assertThat(textOnly.meme()).isNull();
+            verify(memoryService).saveConversation(
+                    "group-text", "以下是QQ群中刚刚连续出现的消息：\n\n群友甲：记得吃饭\n", "知道了");
+
+            // 文字加表情时同时透传两个字段。
+            model.responder = request -> AiMessage.from(
+                    "{\"shouldReply\":true,\"reply\":\"你又开始了\",\"meme\":\"装傻\"}");
+            var textAndMeme = service.chat(new AgentChatRequest(
+                    "group-both", List.of(new ChatMessageItem("event-both", "群友乙", "看我表演"))));
+            assertThat(textAndMeme.shouldReply()).isTrue();
+            assertThat(textAndMeme.reply()).isEqualTo("你又开始了");
+            assertThat(textAndMeme.meme()).isEqualTo("装傻");
+            verify(memoryService).saveConversation(
+                    "group-both", "以下是QQ群中刚刚连续出现的消息：\n\n群友乙：看我表演\n", "你又开始了");
+
+            // 仅发表情时仍需回复，但不向现有记忆逻辑写入标签。
+            model.responder = request -> AiMessage.from(
+                    "{\"shouldReply\":true,\"reply\":\"\",\"meme\":\"开心\"}");
+            var memeOnly = service.chat(new AgentChatRequest(
+                    "group-meme", List.of(new ChatMessageItem("event-meme", "群友丙", "今天请你吃饭"))));
+            assertThat(memeOnly.shouldReply()).isTrue();
+            assertThat(memeOnly.reply()).isEmpty();
+            assertThat(memeOnly.meme()).isEqualTo("开心");
+            verify(memoryService).saveConversation(
+                    "group-meme", "以下是QQ群中刚刚连续出现的消息：\n\n群友丙：今天请你吃饭\n", "");
+        });
+    }
+
+    @Test
+    void systemPromptDefinesStrictMemeOutputContract() throws Exception {
+        String systemPrompt = Files.readString(Path.of("src/main/resources/system.txt"));
+
+        assertThat(systemPrompt)
+                .contains("最终 JSON 必须始终包含 shouldReply、reply、meme 三个字段")
+                .contains("哭脸、流泪、悲伤、疑惑、害怕、阿巴阿巴、装傻、吃白饭、开心、友好、惊喜、喜欢、同意、装酷")
+                .contains("URL", "emojiId", "md5")
+                .contains("{\"shouldReply\":true,\"reply\":\"你又开始了\",\"meme\":null}")
+                .contains("{\"shouldReply\":true,\"reply\":\"你又开始了\",\"meme\":\"装傻\"}")
+                .contains("{\"shouldReply\":true,\"reply\":\"\",\"meme\":\"开心\"}")
+                .contains("{\"shouldReply\":false,\"reply\":\"\",\"meme\":null}")
+                .doesNotContain("\"meme\":\"无语\"", "\"meme\":\"笑\"");
     }
 
     @Test

@@ -59,7 +59,8 @@ public class AgentService {
         // 仅注入 Skill 的名称和描述，由模型通过工具按需获取正文及参考文件。
         AgentDecision decision = qqAssistant.chat(
                 conversationId, longTermMemory, qqSkills.formatAvailableSkills(), message);
-        log.info("ai决策：shouldreply={}，reply={}", decision.shouldReply(), decision.reply());
+        log.info("ai决策：shouldreply={}，reply={}，meme={}",
+                decision.shouldReply(), decision.reply(), decision.meme());
         //保存本轮对话到L0
         try{
             String assistanMessage = "";
@@ -71,14 +72,14 @@ public class AgentService {
         }catch (Exception e){
             log.error("保存L0内存失败", e);
         }
-        //根据ai决策是否回复，判断是否返回回复
+        // shouldReply=false 时固定返回空文字和空表情，不向上游暴露无效内容。
         if (!decision.shouldReply()){
             log.info("AI 不回复");
-            return new AgentChatResponse(false, "");
+            return new AgentChatResponse(false, "", null);
         }
-        // 如果回复不为空，返回回复
-        log.info("AI 回复：{}", decision.reply());
-        return new AgentChatResponse(true, decision.reply());
+        // 原样透传文字与语义标签，包括仅发表情的空文字场景。
+        log.info("AI 回复：reply={}，meme={}", decision.reply(), decision.meme());
+        return new AgentChatResponse(true, decision.reply(), decision.meme());
     }
 
     /**
