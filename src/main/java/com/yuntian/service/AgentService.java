@@ -7,12 +7,12 @@ import com.yuntian.dto.ChatMessageItem;
 import com.yuntian.memory.MemoryService;
 import com.yuntian.memory.dto.AtomicSearchData;
 import com.yuntian.memory.dto.MemoryResponse;
-import dev.langchain4j.skills.Skills;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 聊天服务类
@@ -22,11 +22,14 @@ import java.util.List;
 @Slf4j
 public class AgentService {
 
+    private static final Set<String> ALLOWED_MEMES = Set.of(
+            "哭脸", "流泪", "悲伤", "疑惑", "害怕", "阿巴阿巴", "装傻",
+            "吃白饭", "开心", "友好", "惊喜", "喜欢", "同意", "装酷"
+    );
+
     private final QQAssistant qqAssistant;
 
     private final MemoryService memoryService;
-
-    private final Skills qqSkills;
 
     /**
      * 处理聊天请求
@@ -61,8 +64,8 @@ public class AgentService {
             longTermMemory = "查询相关长期记忆失败。";
         }
 
-        // 仅注入 Skill 的名称和描述，由模型通过工具按需获取正文及参考文件。
-        AgentDecision decision = qqAssistant.chat(conversationId, longTermMemory, qqSkills.formatAvailableSkills(), message);
+        // 固定人格和输出协议已收敛到 system.txt，本轮只注入相关长期记忆与消息批次。
+        AgentDecision decision = qqAssistant.chat(conversationId, longTermMemory, message);
         log.info("ai决策：shouldReply={}，replies={}，replyToEventId={}，meme={}",
                 decision.shouldReply(), decision.replies(), decision.replyToEventId(), decision.meme());
         // 过滤回复，保留非空且非空格的回复，最多保留3个。
@@ -80,10 +83,14 @@ public class AgentService {
             replyToEventId = null;
         }
 
-        // 过滤表情，保留非空且非空格的表情。
+        // 表情只允许协议内的语义标签，避免模型偶发返回未知名称并透传给上游。
         String meme = decision.meme();
-        if (meme != null && meme.isBlank()){
-            meme = null;
+        if (meme != null) {
+            meme = meme.strip();
+            if (meme.isEmpty() || !ALLOWED_MEMES.contains(meme)) {
+                log.warn("AI 返回了无效的 meme 标签，已忽略: {}", meme);
+                meme = null;
+            }
         }
         boolean hasContent = !replies.isEmpty() || meme != null;
         boolean shouldReply = decision.shouldReply() && hasContent;

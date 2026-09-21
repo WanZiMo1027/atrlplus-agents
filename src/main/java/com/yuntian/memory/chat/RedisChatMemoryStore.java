@@ -16,7 +16,8 @@ import static dev.langchain4j.data.message.ChatMessageSerializer.messagesToJson;
 @RequiredArgsConstructor
 public class RedisChatMemoryStore implements ChatMemoryStore {
 
-    private static final String KEY_PREFIX = "qq:chat-memory:";
+    // v2 隔离曾包含 Skill 工具调用的旧窗口；旧 key 继续按原 TTL 自然过期。
+    private static final String KEY_PREFIX = "qq:chat-memory:v2:";
 
     /**
      * 短期记忆过期时间

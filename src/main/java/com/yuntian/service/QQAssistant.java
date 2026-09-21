@@ -11,12 +11,11 @@ import dev.langchain4j.service.spring.AiService;
 @AiService
 public interface QQAssistant {
 
-    // 每轮注入 Skill 目录及长期记忆；详细行为由 activate_skill 返回。
+    // 每轮只注入本次检索到的长期记忆，固定人格与协议统一由 system.txt 管理。
     @SystemMessage(fromResource = "/system.txt")
     AgentDecision chat(
             @MemoryId String conversationId,
             @V("longTermMemory") String longTermMemory,
-            @V("availableSkills") String availableSkills,
             @UserMessage String message
     );
 }
