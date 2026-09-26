@@ -30,9 +30,9 @@ public class LlmConfig {
                 .baseUrl(baseUrl)
                 .modelName(modelName)
                 .customParameters(Map.of("thinking",Map.of("type", "enabled")))
-                .returnThinking(true)
-                .sendThinking(true)
-                .logRequests(true)
+                .returnThinking(false)
+                .sendThinking(false)
+                .logRequests(false)
                 .logResponses(true)
                 .build();
 

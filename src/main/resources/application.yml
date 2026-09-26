@@ -20,7 +20,7 @@ langchain4j:
     chat-model:
       api-key: ${DEEPSEEK_API_KEY}
       base-url: https://api.deepseek.com
-      model-name: deepseek-v4-flash
+      model-name: deepseek-flash
 tencent-memory:
   base-url: http://localhost:8420
   service-id: default

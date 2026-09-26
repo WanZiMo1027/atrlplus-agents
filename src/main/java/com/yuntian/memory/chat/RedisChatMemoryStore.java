@@ -1,6 +1,9 @@
 package com.yuntian.memory.chat;
 
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.Content;
+import dev.langchain4j.data.message.ImageContent;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -34,9 +37,7 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
 
         String key = buildKey(memoryId);
 
-        String json = redisTemplate
-                .opsForValue()
-                .get(key);
+        String json = redisTemplate.opsForValue().get(key);
 
         if (json == null || json.isBlank()) {
             return List.of();
@@ -51,7 +52,22 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
     @Override
     public void updateMessages(Object memoryId, List<ChatMessage> messages){
         String key = buildKey(memoryId);
-        String json = messagesToJson(messages);
+        List<ChatMessage> chatMessages = messages.stream().map(message ->{
+
+            if(!(message instanceof UserMessage userMessage)){
+                return message;
+            }
+            List<Content> contents = userMessage.contents()
+                    .stream()
+                    .filter(content -> !(content instanceof ImageContent))
+                    .toList();
+            return UserMessage.builder()
+                    .name(userMessage.name())
+                    .contents(contents)
+                    .attributes(userMessage.attributes())
+                    .build();
+        }).toList();
+        String json = messagesToJson(chatMessages);
         redisTemplate.opsForValue().set(key, json, TTL);
     }
 

@@ -1,16 +1,17 @@
 package com.yuntian.service;
 
-import com.yuntian.dto.AgentChatRequest;
-import com.yuntian.dto.AgentChatResponse;
-import com.yuntian.dto.AgentDecision;
-import com.yuntian.dto.ChatMessageItem;
+import com.yuntian.dto.*;
 import com.yuntian.memory.MemoryService;
 import com.yuntian.memory.dto.AtomicSearchData;
 import com.yuntian.memory.dto.MemoryResponse;
+import dev.langchain4j.data.message.Content;
+import dev.langchain4j.data.message.ImageContent;
+import dev.langchain4j.data.message.TextContent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -24,7 +25,7 @@ public class AgentService {
 
     private static final Set<String> ALLOWED_MEMES = Set.of(
             "哭脸", "流泪", "悲伤", "疑惑", "害怕", "阿巴阿巴", "装傻",
-            "吃白饭", "开心", "友好", "惊喜", "喜欢", "同意", "装酷"
+            "吃白饭", "开心", "友好", "惊喜", "喜欢", "同意"
     );
 
     private final QQAssistant qqAssistant;
@@ -37,22 +38,22 @@ public class AgentService {
      * @return
      */
     public AgentChatResponse chat(AgentChatRequest request) {
-        // 构造本轮聊天消息
+        // 主要流程：逐条界定消息边界，chat-service 的消息描述不能伪装为下一条事件。
         StringBuilder messageBuilder = new StringBuilder();
         messageBuilder.append("以下是QQ群中刚刚连续出现的消息：\n\n");
 
         for (ChatMessageItem message : request.messages()) {
             messageBuilder.append("[eventId=")
                     .append(message.eventId())
-                    .append("]")
+                    .append("] 发送者=")
                     .append(message.senderName())
-                    .append("：")
+                    .append("\n<message_description>\n")
                     .append(message.text())
-                    .append("\n");
+                    .append("\n</message_description>\n");
         }
         String message = messageBuilder.toString();
         String conversationId = request.conversationId();
-        log.info("请求消息：{}", message);
+        log.info("Agent 收到消息批次: conversationId={}, count={}", conversationId, request.messages().size());
         //查询L1
         String longTermMemory ;
         try {
@@ -64,10 +65,33 @@ public class AgentService {
             longTermMemory = "查询相关长期记忆失败。";
         }
 
-        // 固定人格和输出协议已收敛到 system.txt，本轮只注入相关长期记忆与消息批次。
-        AgentDecision decision = qqAssistant.chat(conversationId, longTermMemory, message);
+        List<Content> contents = new ArrayList<>();
+        contents.add(TextContent.from("以下是QQ群中刚刚连续出现的消息：\n\n"));
+
+        for (ChatMessageItem item : request.messages()) {
+
+            String text = "[eventId=" + item.eventId() + "] 发送者="
+                    + item.senderName()
+                    + "\n<message_description>\n"
+                    + item.text()
+                    + "\n</message_description>\n";
+            // 先添加这条消息的文字
+            contents.add(TextContent.from(text));
+            // 如果这条消息有图片，再紧跟着添加图片
+            for (ChatImageItem image : item.images()) {
+                contents.add(TextContent.from("以下是这条消息附带的动画表情原图,仅供本轮理解："));
+                contents.add(ImageContent.from(image.url()));
+            }
+        }
+        // 整批消息组装完之后，只调用一次模型
+        AgentDecision decision = qqAssistant.chat(
+                conversationId,
+                longTermMemory,
+                contents
+        );
         log.info("ai决策：shouldReply={}，replies={}，replyToEventId={}，meme={}",
                 decision.shouldReply(), decision.replies(), decision.replyToEventId(), decision.meme());
+
         // 过滤回复，保留非空且非空格的回复，最多保留3个。
         List<String> replies = decision.replies() == null ?
                 List.of():

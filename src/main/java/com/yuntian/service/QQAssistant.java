@@ -2,11 +2,14 @@ package com.yuntian.service;
 
 
 import com.yuntian.dto.AgentDecision;
+import dev.langchain4j.data.message.Content;
 import dev.langchain4j.service.MemoryId;
 import dev.langchain4j.service.SystemMessage;
 import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.V;
 import dev.langchain4j.service.spring.AiService;
+
+import java.util.List;
 
 @AiService
 public interface QQAssistant {
@@ -16,6 +19,6 @@ public interface QQAssistant {
     AgentDecision chat(
             @MemoryId String conversationId,
             @V("longTermMemory") String longTermMemory,
-            @UserMessage String message
+            @UserMessage List<Content> message
     );
 }
