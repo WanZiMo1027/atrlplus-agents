@@ -7,6 +7,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
+import com.fasterxml.jackson.databind.JsonNode;
+import java.util.Map;
 
 /**
  * 腾讯记忆客户端：携带服务 ID、用户密钥及 v3 路由要求的 Bearer Header。
@@ -99,5 +101,47 @@ public interface TencentMemoryClient {
             @RequestParam("limit") int limit,
             @RequestParam("offset") int offset,
             @RequestParam("time_order") String timeOrder
+    );
+
+    @GetMapping("/v3/memory-prompt/get")
+    MemoryResponse<MemoryPromptRecord> getEffectiveMemoryPrompt(
+            @RequestHeader("x-tdai-service-id") String serviceId,
+            @RequestHeader("x-tdai-user-key") String userKey,
+            @RequestHeader("Authorization") String authorization,
+            @RequestParam("layer") String layer,
+            @RequestParam("team_id") String teamId,
+            @RequestParam("agent_id") String agentId
+    );
+
+    @PostMapping("/v3/memory-prompt/update")
+    MemoryResponse<MemoryPromptUpdateData> updateMemoryPrompt(
+            @RequestHeader("x-tdai-service-id") String serviceId,
+            @RequestHeader("x-tdai-user-key") String userKey,
+            @RequestHeader("Authorization") String authorization,
+            @RequestBody MemoryPromptUpdateRequest request
+    );
+
+    @PostMapping("/v3/atomic/query")
+    MemoryResponse<JsonNode> queryAtomic(
+            @RequestHeader("x-tdai-service-id") String serviceId,
+            @RequestHeader("x-tdai-user-key") String userKey,
+            @RequestHeader("Authorization") String authorization,
+            @RequestBody Map<String, Object> request
+    );
+
+    @PostMapping("/v3/atomic/update")
+    MemoryResponse<JsonNode> updateAtomic(
+            @RequestHeader("x-tdai-service-id") String serviceId,
+            @RequestHeader("x-tdai-user-key") String userKey,
+            @RequestHeader("Authorization") String authorization,
+            @RequestBody Map<String, Object> request
+    );
+
+    @PostMapping("/v3/atomic/delete")
+    MemoryResponse<JsonNode> deleteAtomic(
+            @RequestHeader("x-tdai-service-id") String serviceId,
+            @RequestHeader("x-tdai-user-key") String userKey,
+            @RequestHeader("Authorization") String authorization,
+            @RequestBody Map<String, Object> request
     );
 }

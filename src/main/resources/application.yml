@@ -29,3 +29,8 @@ tencent-memory:
   team-id: team-k6gyu6flql
   agent-id: agt-k6o5vyz26h
   user-id: usr-kzdjrfz1k4
+
+admin:
+  internal:
+    enabled: ${ADMIN_INTERNAL_ENABLED:false}
+    token: ${ADMIN_INTERNAL_TOKEN:}
