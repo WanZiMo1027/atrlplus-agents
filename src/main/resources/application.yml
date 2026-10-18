@@ -34,3 +34,29 @@ admin:
   internal:
     enabled: ${ADMIN_INTERNAL_ENABLED:false}
     token: ${ADMIN_INTERNAL_TOKEN:}
+
+# 上下文预算按保守估算控制；容量满时拒绝接收，不删除尚未可靠归档的原文。
+agent:
+  context:
+    enabled: true
+    token-budget: 65536
+    compression-threshold: 49152
+    keep-recent-messages: 20
+    # 摘要按实际输出 Token 校验；缺少有效 usage 时按 UTF-8 字节保守估算，总上下文仍独立核算。
+    max-summary-tokens: 2048
+    max-long-term-memory-tokens: 4096
+    # 主模型 thinking 与决策正文共用；同时作为发送上限与上下文输出预留。
+    output-reserved-tokens: 8192
+    protocol-reserved-tokens: 512
+    # 单图估算上界须按实际多模态服务校准；图片数量和正文均参与最终预算检查。
+    image-token-budget: 4096
+    compactor-token-budget: 32768
+    max-compactions-per-request: 4
+    lease-duration: 2m
+    model-timeout: 60s
+    compactor-timeout: 30s
+    # summary-model 可单独设置 api-key、base-url、model-name；缺省继承主模型连接参数。
+    storage:
+      max-retained-batches: 1000
+      max-retained-bytes: 16777216
+      max-batch-bytes: 262144
