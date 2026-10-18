@@ -45,35 +45,39 @@ public class AgentService {
         try (var session = contextManager.open(request)) {
             if (session.replayedDecision() != null) {
                 session.renew();
-                return session.replayedDecision();
+                // 重放只沿用已保存记录；关闭回复的请求不能返回以前的可发送结果。
+                return request.replyEnabled() ? session.replayedDecision() : ContextManager.SILENT;
             }
             String conversationId = request.conversationId();
             String message = messageFormatter.text(request.messages());
             log.info("Agent 收到消息批次: conversationId={}, count={}", conversationId, request.messages().size());
-            String longTermMemory;
-            session.renew();
-            try {
-                longTermMemory = extractMemoryText(memoryService.searchMemory(conversationId, message));
-            } catch (Exception failure) {
-                log.warn("查询 L1 失败，继续本轮决策: conversationId={}", conversationId);
-                longTermMemory = "没有可用的相关长期记忆。";
-            }
-            var context = session.prepare(longTermMemory);
             AgentChatResponse response = ContextManager.SILENT;
-            if (context.callable()) {
+            // 主要流程：只记录模式保留原文和 L0 写入，跳过检索、摘要及回复模型。
+            if (request.replyEnabled()) {
+                String longTermMemory;
+                session.renew();
                 try {
-                    // 摘要经 @V 单独进入 system；当前多模态消息只由 LangChain4j 添加一次。
-                    AgentDecision decision = qqAssistant.chat(conversationId, context.longTermMemory(),
-                            context.summary(), context.current());
-                    response = normalize(decision, request.messages());
-                } catch (ContextTokenEstimator.BudgetExceededException failure) {
-                    log.warn("最终请求超预算，保留原文并静默兜底: conversationId={}", conversationId);
-                } catch (InvalidDecisionOutputException failure) {
-                    log.warn("主模型正文为空或未正常完成，保留原文并静默兜底: conversationId={}, {}",
-                            conversationId, failure.getMessage());
-                } catch (OutputParsingException failure) {
-                    // 解析异常可能含有未过滤模型正文，不打印异常内容；最终提交仍须通过租约和 revision 校验。
-                    log.warn("主模型决策解析失败，保留原文并静默兜底: conversationId={}", conversationId);
+                    longTermMemory = extractMemoryText(memoryService.searchMemory(conversationId, message));
+                } catch (Exception failure) {
+                    log.warn("查询 L1 失败，继续本轮决策: conversationId={}", conversationId);
+                    longTermMemory = "没有可用的相关长期记忆。";
+                }
+                var context = session.prepare(longTermMemory);
+                if (context.callable()) {
+                    try {
+                        // 摘要经 @V 单独进入 system；当前多模态消息只由 LangChain4j 添加一次。
+                        AgentDecision decision = qqAssistant.chat(conversationId, context.longTermMemory(),
+                                context.summary(), context.current());
+                        response = normalize(decision, request.messages());
+                    } catch (ContextTokenEstimator.BudgetExceededException failure) {
+                        log.warn("最终请求超预算，保留原文并静默兜底: conversationId={}", conversationId);
+                    } catch (InvalidDecisionOutputException failure) {
+                        log.warn("主模型正文为空或未正常完成，保留原文并静默兜底: conversationId={}, {}",
+                                conversationId, failure.getMessage());
+                    } catch (OutputParsingException failure) {
+                        // 解析异常可能含有未过滤模型正文，不打印异常内容；最终提交仍须通过租约和 revision 校验。
+                        log.warn("主模型决策解析失败，保留原文并静默兜底: conversationId={}", conversationId);
+                    }
                 }
             }
             // 仅持久化过滤后的四字段协议；add(AiMessage) 收到的原始 JSON 绝不能作为实际发言。
