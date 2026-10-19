@@ -37,6 +37,36 @@ admin:
 
 # 上下文预算按保守估算控制；容量满时拒绝接收，不删除尚未可靠归档的原文。
 agent:
+  # 独立学习开关；开启时才创建专用数据库、模型和后台任务。
+  style-learning:
+    enabled: ${STYLE_LEARNING_ENABLED:false}
+    conversations: ${STYLE_LEARNING_CONVERSATIONS:}
+    bot-sender-ids: ${STYLE_LEARNING_BOT_SENDER_IDS:}
+    poll-interval: 30s
+    message-threshold: 40
+    max-new-messages: 80
+    overlap-messages: 20
+    max-wait: 15m
+    input-budget: 32768
+    output-tokens: 4096
+    model-timeout: 60s
+    lease-duration: 2m
+    schema: agent_style
+    reply:
+      enabled: ${STYLE_REPLY_ENABLED:false}
+      timeout: 5s
+      scene-timeout: 3s
+      input-budget: 8192
+      sample-budget: 4096
+      limit: 3
+    database:
+      url: ${STYLE_DB_URL:}
+      username: ${STYLE_DB_USERNAME:postgres}
+      password: ${STYLE_DB_PASSWORD:}
+    embedding:
+      base-url: ${STYLE_EMBEDDING_BASE_URL:}
+      model-name: ${STYLE_EMBEDDING_MODEL_NAME:}
+      api-key: ${STYLE_EMBEDDING_API_KEY:}
   context:
     enabled: true
     token-budget: 65536

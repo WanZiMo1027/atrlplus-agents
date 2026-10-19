@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import com.yuntian.style.StyleExampleRenderer;
 
 /** 同步 Agent 调用的协调层：接收原文 → 预算/增量摘要 → 临时视图 → 提交业务决策。 */
 @Component
@@ -80,12 +81,22 @@ public class ContextManager {
         var session = session(memoryId);
         long estimate = tokens.total(request.messages())
                 + tokens.text(request.responseFormat() == null ? "" : request.responseFormat().toString());
+        if(estimate>properties.getTokenBudget() && session.view!=null && !session.view.styleExamples().isEmpty()) {
+            // 框架追加协议后仍可能变大；先移除整块样本，再检查基础请求，不能为可选风格牺牲回复。
+            String examples=session.view.styleExamples();
+            request=request.toBuilder().messages(request.messages().stream().map(m->m instanceof SystemMessage value
+                    ? (ChatMessage)SystemMessage.from(prompt.withoutStyle(value.text(),examples)):m).toList()).build();
+            session.attachStyleExamples(List.of());
+            estimate=tokens.total(request.messages())+tokens.text(request.responseFormat()==null?"":request.responseFormat().toString());
+        }
         if (estimate > properties.getTokenBudget()
                 || (request.toolSpecifications() != null && !request.toolSpecifications().isEmpty())) {
             throw new ContextTokenEstimator.BudgetExceededException("最终 Agent 请求超过上下文预算");
         }
         session.renew();
         session.actualEstimatedTokens = estimate;
+        log.info("风格参考采用: conversationId={}, count={}, fragmentIds={}",memoryId,
+                session.view==null?0:session.view.styleFragmentIds().size(),session.view==null?List.of():session.view.styleFragmentIds());
         var parameters = request.parameters().overrideWith(ChatRequestParameters.builder()
                 .maxOutputTokens(properties.getOutputReservedTokens()).build());
         return request.toBuilder().parameters(parameters).build();
@@ -105,6 +116,7 @@ public class ContextManager {
         private SystemMessage system;
         private long actualEstimatedTokens;
         private boolean closed;
+        private List<ContextSummaryStore.Batch> styleHistory = List.of();
 
         private Session(AgentChatRequest request, ContextSummaryStore.Lease lease, ContextSummaryStore.BeginResult begin) {
             this.request = request;
@@ -140,8 +152,11 @@ public class ContextManager {
         }
 
         private long estimate(String summary, String l1, List<ChatMessage> history, List<Content> contents) {
+            return estimate(summary,l1,history,contents,"");
+        }
+        private long estimate(String summary,String l1,List<ChatMessage> history,List<Content> contents,String examples) {
             List<ChatMessage> messages = new ArrayList<>();
-            messages.add(SystemMessage.from(prompt.render(summary, l1)));
+            messages.add(SystemMessage.from(prompt.render(summary, l1, examples)));
             messages.addAll(history);
             messages.add(UserMessage.from(contents));
             // 这里尚未包含框架追加的 JSON 格式说明，预先另留展开余量；guard 会按完整请求重新核算。
@@ -193,9 +208,30 @@ public class ContextManager {
                 degraded = true;
             }
             view = new View(summary, l1, rendered(batches), contents, cost,
-                    cost <= properties.getTokenBudget(), degraded, snapshot.lastCompressedSequence());
+                    cost <= properties.getTokenBudget(), degraded, snapshot.lastCompressedSequence(),"",List.of());
+            // 留下已读快照的原始窗口供场景识别；只返回原批次，不渲染其中的机器人计划。
+            var originals=snapshot.batches().stream().filter(b->b.sequence()<begin.sequence()).toList();
+            int count=0,start=originals.size();
+            while(start>0 && count<24) count+=originals.get(--start).messages().size();
+            styleHistory=List.copyOf(originals.subList(start,originals.size()));
             log.info("上下文预算: conversationId={}, estimated={}, budget={}, summaryVersion={}, degraded={}, callable={}",
                     lease.conversationId(), cost, properties.getTokenBudget(), snapshot.summaryVersion(), degraded, view.callable());
+            return view;
+        }
+
+        public List<ContextSummaryStore.Batch> recentOriginalBatches() { return styleHistory; }
+        public View attachStyleExamples(List<StyleExampleRenderer.Example> input) {
+            if(view==null||!view.callable()) return view;
+            var chosen=new ArrayList<>(input);
+            String examples=StyleExampleRenderer.render(chosen);
+            long cost=estimate(view.summary(),view.longTermMemory(),view.history(),view.current(),examples);
+            while(cost>properties.getTokenBudget()&&!chosen.isEmpty()) {
+                chosen.remove(chosen.size()-1);examples=StyleExampleRenderer.render(chosen);
+                cost=estimate(view.summary(),view.longTermMemory(),view.history(),view.current(),examples);
+            }
+            // 只改变临时模型视图，不触碰原文、摘要或持久化游标。
+            view=new View(view.summary(),view.longTermMemory(),view.history(),view.current(),cost,view.callable(),view.degraded(),
+                    view.compressedThrough(),examples,chosen.stream().map(StyleExampleRenderer.Example::id).toList());
             return view;
         }
 
@@ -222,8 +258,8 @@ public class ContextManager {
     }
 
     public record View(String summary, String longTermMemory, List<ChatMessage> history, List<Content> current,
-            long estimatedTokens, boolean callable, boolean degraded, long compressedThrough) {
-        public View { history = List.copyOf(history); current = List.copyOf(current); }
+            long estimatedTokens, boolean callable, boolean degraded, long compressedThrough,String styleExamples,List<Long> styleFragmentIds) {
+        public View { history = List.copyOf(history); current = List.copyOf(current);styleFragmentIds=List.copyOf(styleFragmentIds); }
     }
 
     public static class ConversationBusyException extends IllegalStateException {

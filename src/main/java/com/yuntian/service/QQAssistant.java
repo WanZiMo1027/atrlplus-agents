@@ -11,11 +11,12 @@ import java.util.List;
 
 public interface QQAssistant {
 
-    // ChatMemoryConfig 以 UTF-8 加载 system.txt；摘要和 L1 是独立背景，不保存成聊天消息。
+    // ChatMemoryConfig 以 UTF-8 加载 system.txt；摘要、L1和风格样本是独立背景，不保存成聊天消息。
     AgentDecision chat(
             @MemoryId String conversationId,
             @V("longTermMemory") String longTermMemory,
             @V("compressedContext") String compressedContext,
+            @V("styleExamples") String styleExamples,
             @UserMessage List<Content> message
     );
 }

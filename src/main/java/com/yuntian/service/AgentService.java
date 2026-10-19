@@ -8,19 +8,20 @@ import com.yuntian.context.DecisionChatModel.InvalidDecisionOutputException;
 import com.yuntian.memory.MemoryService;
 import com.yuntian.memory.dto.AtomicSearchData;
 import com.yuntian.memory.dto.MemoryResponse;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import dev.langchain4j.service.output.OutputParsingException;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Set;
+import java.util.Optional;
+import com.yuntian.style.StyleReplyService;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * 聊天服务类
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class AgentService {
 
@@ -34,6 +35,15 @@ public class AgentService {
     private final MemoryService memoryService;
     private final ContextManager contextManager;
     private final ContextMessageFormatter messageFormatter;
+    private final Optional<StyleReplyService> styleReplies;
+
+    @Autowired
+    public AgentService(QQAssistant assistant,MemoryService memory,ContextManager context,ContextMessageFormatter formatter,Optional<StyleReplyService> styles) {
+        this.qqAssistant=assistant;this.memoryService=memory;this.contextManager=context;this.messageFormatter=formatter;this.styleReplies=styles;
+    }
+    public AgentService(QQAssistant assistant,MemoryService memory,ContextManager context,ContextMessageFormatter formatter) {
+        this(assistant,memory,context,formatter,Optional.empty());
+    }
 
     /**
      * 处理聊天请求
@@ -64,10 +74,21 @@ public class AgentService {
                 }
                 var context = session.prepare(longTermMemory);
                 if (context.callable()) {
+                    if(styleReplies.isPresent()) {
+                        var styles=styleReplies.get();
+                        try {
+                            var reference=styles.references(conversationId,()->styles.input(conversationId,session.recentOriginalBatches(),request.messages(),session.sequence()));
+                            context=session.attachStyleExamples(reference.examples());
+                        }catch(RuntimeException unavailable) {
+                            log.warn("风格参考不可用，继续基础决策: conversationId={}",conversationId);
+                        }
+                        // 可选依赖失败可以回退，租约失效则绝不能被上述降级吞掉。
+                        session.renew();
+                    }
                     try {
                         // 摘要经 @V 单独进入 system；当前多模态消息只由 LangChain4j 添加一次。
                         AgentDecision decision = qqAssistant.chat(conversationId, context.longTermMemory(),
-                                context.summary(), context.current());
+                                context.summary(), context.styleExamples(), context.current());
                         response = normalize(decision, request.messages());
                     } catch (ContextTokenEstimator.BudgetExceededException failure) {
                         log.warn("最终请求超预算，保留原文并静默兜底: conversationId={}", conversationId);
@@ -96,8 +117,7 @@ public class AgentService {
     }
 
     private AgentChatResponse normalize(AgentDecision decision, List<ChatMessageItem> messages) {
-        log.info("ai决策：shouldReply={}，replies={}，replyToEventId={}，meme={}",
-                decision.shouldReply(), decision.replies(), decision.replyToEventId(), decision.meme());
+        log.info("ai决策：shouldReply={}，replyCount={}",decision.shouldReply(),decision.replies()==null?0:decision.replies().size());
 
         // 过滤回复，保留非空且非空格的回复，最多保留3个。
         List<String> replies = decision.replies() == null ?
@@ -119,7 +139,7 @@ public class AgentService {
         if (meme != null) {
             meme = meme.strip();
             if (meme.isEmpty() || !ALLOWED_MEMES.contains(meme)) {
-                log.warn("AI 返回了无效的 meme 标签，已忽略: {}", meme);
+                log.warn("AI 返回了无效的 meme 标签，已忽略");
                 meme = null;
             }
         }
@@ -131,7 +151,7 @@ public class AgentService {
             return new AgentChatResponse(false, List.of(), null, null);
         }
         // 原样透传文字与语义标签，包括仅发表情的空文字场景。
-        log.info("AI 回复：reply={}，meme={}，replyToEventId={}", replies, meme, replyToEventId);
+        log.info("AI 回复：replyCount={}，hasMeme={}，hasQuote={}", replies.size(), meme!=null, replyToEventId!=null);
         return new AgentChatResponse(true, replies, replyToEventId, meme);
     }
 
@@ -168,7 +188,7 @@ public class AgentService {
         boolean exists = messages.stream().anyMatch(message -> candidate.equals(message.eventId()));
 
         if (!exists) {
-            log.warn("AI 返回了无效的 replyToEventId，已忽略: {}", candidate);
+            log.warn("AI 返回了无效的 replyToEventId，已忽略");
             return null;
         }
         return candidate;
